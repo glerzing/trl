@@ -36,7 +36,7 @@ from .utils import ConstantLengthDataset
 
 
 if is_peft_available():
-    from peft import PeftConfig, PeftModel, get_peft_model, prepare_model_for_int8_training
+    from peft import PeftConfig, PeftModel, get_peft_config, get_peft_model, prepare_model_for_int8_training
 
 
 class PeftSavingCallback(TrainerCallback):
@@ -81,7 +81,7 @@ class SFTTrainer(Trainer):
             The optimizer and scheduler to use for training.
         preprocess_logits_for_metrics (`Callable[[torch.Tensor, torch.Tensor], torch.Tensor]`):
             The function to use to preprocess the logits before computing the metrics.
-        peft_config (`Optional[PeftConfig]`):
+        peft_config (`Optional[Union[dict, peft.PeftConfig]]`):
             The PeftConfig object to use to initialize the PeftModel.
         dataset_text_field (`Optional[str]`):
             The name of the text field of the dataset, in case this is passed by a user, the trainer will automatically create a
@@ -130,18 +130,18 @@ class SFTTrainer(Trainer):
                 "`AutoModelForCausalLM` or a `PeftModel` (if you passed a `peft_config`) for you."
             )
 
-        if is_peft_available() and peft_config is not None:
+        if peft_config is not None:
+            if not is_peft_available():
+                raise ModuleNotFoundError("To use the argument peft_config, please install `peft`")
             if not isinstance(peft_config, PeftConfig):
-                raise ValueError(
-                    "If you want to use the PeftModel, you need to pass a PeftConfig object to the SFTTrainer."
-                    f" and you passed a {type(peft_config)}."
-                )
+                if isinstance (peft_config, dict):
+                    peft_config = get_peft_config(peft_config)
+                else:
+                    raise ValueError(f"`peft_config` should be a dict or a `peft.PeftConfig`, not a {type(peft_config)}.")
 
             if not isinstance(model, PeftModel):
                 if not isinstance(model, PreTrainedModel):
-                    model = AutoModelForCausalLM.from_pretrained(
-                        model,
-                    )
+                    model = AutoModelForCausalLM.from_pretrained(model)
 
                 if getattr(model, "is_loaded_in_8bit", False):
                     model = prepare_model_for_int8_training(model)

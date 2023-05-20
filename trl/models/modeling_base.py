@@ -31,6 +31,7 @@ if is_peft_available():
         PeftModel,
         PeftModelForCausalLM,
         PeftModelForSeq2SeqLM,
+        get_peft_config,
         get_peft_model,
         prepare_model_for_int8_training,
     )
@@ -133,8 +134,14 @@ class PreTrainedModelWrapper(nn.Module):
             )
             pretrained_kwargs["device_map"] = {"": current_device}
 
-        if is_peft_available() and peft_config is not None and not isinstance(peft_config, PeftConfig):
-            raise ValueError("The `peft_config` argument should be an instance of `peft.PeftConfig` class.")
+        if peft_config is not None:
+            if not is_peft_available():
+                raise ModuleNotFoundError("To use the argument peft_config, please install `peft`")
+            if not isinstance(peft_config, PeftConfig):
+                if isinstance (peft_config, dict):
+                    peft_config = get_peft_config(peft_config)
+                else:
+                    raise ValueError("`peft_config` should be an instance of `peft.PeftConfig` or a dict.")
 
         # First, load the pre-trained model using the parent-class
         # either `AutoModelForCausalLM` or `AutoModelForSeq2SeqLM`
@@ -151,15 +158,21 @@ class PreTrainedModelWrapper(nn.Module):
             # 1- check if `adapter_config` has been saved in the hub or locally
             # 2- if yes, load the `peft` config
             # 3- use the config to load the `transformers` model and then load the `peft` model
-            if (
-                os.path.exists(pretrained_model_name_or_path)
-                and ("adapter_config.json" in os.listdir(pretrained_model_name_or_path) or peft_filename is not None)
-                and is_peft_available()
-            ):
-                if peft_filename is not None:
-                    peft_config = PeftConfig.from_pretrained(peft_filename)
-                else:
+            local_adapter_present = os.path.exists(os.path.join(pretrained_model_name_or_path, "adapter_config.json"))
+            remote_adapter_present = peft_filename is not None
+
+            if ((local_adapter_present or remote_adapter_present) and is_peft_available()):
+                if peft_config is not None:
+                    logging.warning(
+                        "`peft_config` argument ignored since a peft config file was found in",
+                        pretrained_model_name_or_path
+                    )
+
+                # Load the trained peft adapter
+                if local_adapter_present:
                     peft_config = PeftConfig.from_pretrained(pretrained_model_name_or_path)
+                else:
+                    peft_config = PeftConfig.from_pretrained(peft_filename)
 
                 pretrained_model = cls.transformers_parent_class.from_pretrained(
                     peft_config.base_model_name_or_path, *model_args, **pretrained_kwargs
@@ -174,6 +187,7 @@ class PreTrainedModelWrapper(nn.Module):
                 )
 
                 if peft_config is not None:
+                    # Initialize a new peft adapter with the given config
                     if is_loaded_in_8bit:
                         pretrained_model = prepare_model_for_int8_training(
                             pretrained_model,
@@ -185,6 +199,7 @@ class PreTrainedModelWrapper(nn.Module):
             pretrained_model = pretrained_model_name_or_path
 
             if peft_config is not None and isinstance(pretrained_model, PreTrainedModel):
+                # Initialize a new peft adapter with the given config
                 if is_loaded_in_8bit:
                     pretrained_model = prepare_model_for_int8_training(
                         pretrained_model,

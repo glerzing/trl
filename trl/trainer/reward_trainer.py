@@ -27,7 +27,7 @@ from .utils import RewardDataCollatorWithPadding
 
 
 if is_peft_available():
-    from peft import get_peft_model
+    from peft import get_peft_config, get_peft_model, PeftConfig
 
 
 def compute_accuracy(eval_pred):
@@ -103,14 +103,18 @@ class RewardTrainer(Trainer):
                 The function to use to preprocess the logits before computing the metrics.
             max_length (`int`, defaults to `None`):
                 The maximum length of the sequences in the batch. This argument is required if you want to use the default data collator.
-            peft_config (`Dict`, defaults to `None`):
+            peft_config (`Dict` or `peft.PeftConfig`, defaults to `None`):
                 The PEFT configuration to use for training. If you pass a PEFT configuration, the model will be wrapped in a PEFT model.
         """
-        if not is_peft_available() and peft_config is not None:
-            raise ValueError(
-                "PEFT is not installed and you passed a `peft_config` in the trainer's kwargs, please install it to use the PEFT models"
-            )
-        elif is_peft_available() and peft_config is not None:
+        if peft_config is not None:
+            if not is_peft_available():
+                raise ModuleNotFoundError("To use the argument peft_config, please install `peft`")
+            if not isinstance(peft_config, PeftConfig):
+                if isinstance (peft_config, dict):
+                    peft_config = get_peft_config(peft_config)
+                else:
+                    raise ValueError(f"`peft_config` should be a dict or a `peft.PeftConfig`, not a {type(peft_config)}.")
+
             model = get_peft_model(model, peft_config)
 
         if compute_metrics is None:
